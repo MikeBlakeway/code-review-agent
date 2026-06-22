@@ -70,4 +70,21 @@ describe("review request helpers", () => {
     expect(prompt).toContain("Risk areas");
     expect(prompt).toContain("file references");
   });
+
+  it("requires observable trace and evidence-backed suggestions", () => {
+    const prompt = createReviewSystemPrompt({
+      owner: "vercel",
+      repo: "ai",
+      pullNumber: 123,
+      url: "https://github.com/vercel/ai/pull/123",
+    });
+
+    expect(prompt).toContain("## Agent trace");
+    expect(prompt).toContain("Why this tool");
+    expect(prompt).toContain("Severity:");
+    expect(prompt).toContain("Confidence:");
+    expect(prompt).toContain("Evidence:");
+    expect(prompt).toContain("Reasoning:");
+    expect(prompt).toContain("Do not reveal hidden chain-of-thought");
+  });
 });

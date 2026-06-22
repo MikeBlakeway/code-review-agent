@@ -88,20 +88,24 @@ export function ReviewAgent() {
         <div className="grid flex-1 gap-6 lg:grid-cols-[360px_1fr]">
           <aside className="rounded-lg border border-white/10 bg-zinc-950 p-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-white">Tool calls</h2>
+              <h2 className="text-sm font-semibold text-white">Agent trace</h2>
               <span className="font-mono text-xs text-zinc-500">
-                {toolEvents.length} observed
+                {toolEvents.length} steps
               </span>
             </div>
             <div className="mt-4 space-y-3">
               {toolEvents.length === 0 ? (
                 <EmptyState>
-                  Tool progress will appear here as the model reads the diff,
-                  files, tree, and search results.
+                  The agent timeline will appear here as it inspects the diff,
+                  reads files, searches patterns, and builds evidence.
                 </EmptyState>
               ) : (
                 toolEvents.map((part, index) => (
-                  <ToolEvent key={`${part.type}-${index}`} part={part} />
+                  <ToolEvent
+                    key={`${part.type}-${index}`}
+                    part={part}
+                    stepNumber={index + 1}
+                  />
                 ))
               )}
             </div>
@@ -160,12 +164,14 @@ function MessagePart({ part }: { part: RenderablePart }) {
 function ToolEvent({
   part,
   compact = false,
+  stepNumber,
 }: {
   part: RenderablePart;
   compact?: boolean;
+  stepNumber?: number;
 }) {
   const toolName = part.type.replace(/^tool-/, "").replaceAll("_", " ");
-  const summary = getToolSummary(toolName, part);
+  const trace = getToolTrace(toolName, part);
   const hasDetails = Boolean(part.input || part.output);
 
   return (
@@ -177,16 +183,20 @@ function ToolEvent({
       }
     >
       <div className="flex items-center justify-between gap-3">
-        <span className="font-mono text-xs text-cyan-200">{toolName}</span>
+        <span className="font-mono text-xs text-cyan-200">
+          {typeof stepNumber === "number" ? `${stepNumber}. ` : ""}
+          {toolName}
+        </span>
         <span className="font-mono text-[11px] text-zinc-500">
           {part.state ?? "pending"}
         </span>
       </div>
-      {summary ? (
-        <p className="mt-2 break-words font-mono text-xs leading-5 text-zinc-300">
-          {summary}
-        </p>
-      ) : null}
+      <dl className="mt-3 space-y-2 text-xs leading-5">
+        <TraceRow label="Why" value={trace.why} />
+        <TraceRow label="Input" value={trace.input} />
+        <TraceRow label="Learned" value={trace.learned} />
+        <TraceRow label="Next" value={trace.next} />
+      </dl>
       {part.errorText ? (
         <p className="mt-2 text-xs text-red-200">{part.errorText}</p>
       ) : null}
@@ -200,6 +210,21 @@ function ToolEvent({
           </pre>
         </details>
       ) : null}
+    </div>
+  );
+}
+
+function TraceRow({ label, value }: { label: string; value?: string }) {
+  if (!value) {
+    return null;
+  }
+
+  return (
+    <div className="grid grid-cols-[54px_1fr] gap-2">
+      <dt className="font-mono text-[11px] uppercase tracking-wide text-zinc-500">
+        {label}
+      </dt>
+      <dd className="break-words font-mono text-zinc-300">{value}</dd>
     </div>
   );
 }
@@ -287,50 +312,75 @@ function MarkdownContent({ children }: { children: string }) {
   );
 }
 
-function getToolSummary(toolName: string, part: RenderablePart) {
+function getToolTrace(toolName: string, part: RenderablePart) {
   const input = asRecord(part.input);
   const output = asRecord(part.output);
 
   if (toolName === "read file") {
     const path = stringValue(input.path) ?? stringValue(output.path);
     const ref = stringValue(input.ref) ?? stringValue(output.ref);
-    return [path, ref ? `@ ${ref}` : undefined].filter(Boolean).join(" ");
+    return {
+      why: "Read source context that was not visible in the diff.",
+      input: [path, ref ? `@ ${ref}` : undefined].filter(Boolean).join(" "),
+      learned: stringValue(output.path)
+        ? `Loaded ${stringValue(output.path)}`
+        : undefined,
+      next: "Use the file context to validate or reject review findings.",
+    };
   }
 
   if (toolName === "search codebase") {
     const query = stringValue(input.query);
     const resultCount = arrayLength(output.results);
-    return [
-      query ? `"${query}"` : undefined,
-      typeof resultCount === "number" ? `-> ${resultCount} results` : undefined,
-    ]
-      .filter(Boolean)
-      .join(" ");
+    return {
+      why: "Find related patterns, usages, or project conventions.",
+      input: query ? `"${query}"` : undefined,
+      learned:
+        typeof resultCount === "number" ? `${resultCount} results` : undefined,
+      next: "Compare the PR against matching codebase patterns.",
+    };
   }
 
   if (toolName === "get pr diff") {
     const totalFiles = numberValue(output.totalFiles);
     const headSha = stringValue(asRecord(output.pullRequest).headSha);
-    return [
-      typeof totalFiles === "number" ? `${totalFiles} changed files` : undefined,
-      headSha ? `@ ${headSha}` : undefined,
-    ]
-      .filter(Boolean)
-      .join(" ");
+    return {
+      why: "Start from the changed files and patch hunks.",
+      input: "Submitted pull request",
+      learned: [
+        typeof totalFiles === "number"
+          ? `${totalFiles} changed files`
+          : undefined,
+        headSha ? `head ${headSha}` : undefined,
+      ]
+        .filter(Boolean)
+        .join(", "),
+      next: "Choose changed files that need deeper context.",
+    };
   }
 
   if (toolName === "get file tree") {
     const depth = numberValue(input.depth);
     const entries = arrayLength(output.entries);
-    return [
-      typeof depth === "number" ? `depth ${depth}` : undefined,
-      typeof entries === "number" ? `-> ${entries} entries` : undefined,
-    ]
-      .filter(Boolean)
-      .join(" ");
+    return {
+      why: "Orient around repository structure.",
+      input: typeof depth === "number" ? `depth ${depth}` : undefined,
+      learned: typeof entries === "number" ? `${entries} entries` : undefined,
+      next: "Use structure to decide which files or conventions matter.",
+    };
   }
 
-  return undefined;
+  return {
+    why: "Run a model-selected tool step.",
+    input: compactJson(input),
+    learned: compactJson(output),
+    next: "Continue review once the tool result is available.",
+  };
+}
+
+function compactJson(value: unknown) {
+  const text = JSON.stringify(value);
+  return text && text !== "{}" ? text.slice(0, 160) : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
