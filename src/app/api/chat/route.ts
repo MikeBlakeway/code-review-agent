@@ -15,7 +15,7 @@ import { createGitHubReviewTools } from "../../../lib/github/review-tools";
 
 export const maxDuration = 60;
 
-const defaultModel = "anthropic/claude-sonnet-4.6";
+const defaultModel = "openai/gpt-4.1-mini";
 
 export async function POST(req: Request) {
   try {

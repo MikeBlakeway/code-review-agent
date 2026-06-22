@@ -154,10 +154,32 @@ export async function searchCodebaseForReview(
   return { results };
 }
 
+export function createCachingGitHubApi(api: GitHubApi): GitHubApi {
+  const pullRequests = new Map<string, Promise<GitHubPullRequest>>();
+
+  return {
+    ...api,
+    getPullRequest(locator) {
+      const key = `${locator.owner}/${locator.repo}#${locator.pullNumber}`;
+      const existing = pullRequests.get(key);
+
+      if (existing) {
+        return existing;
+      }
+
+      const pullRequest = api.getPullRequest(locator);
+      pullRequests.set(key, pullRequest);
+      return pullRequest;
+    },
+  };
+}
+
 export function createGitHubReviewTools(
   api: GitHubApi,
   locator: PullRequestLocator,
 ) {
+  const cachedApi = createCachingGitHubApi(api);
+
   return {
     get_pr_diff: tool({
       description:
@@ -166,7 +188,7 @@ export function createGitHubReviewTools(
         maxFiles: z.number().int().min(1).max(100).optional(),
       }),
       strict: true,
-      execute: (input) => getPrDiffForReview(api, locator, input),
+      execute: (input) => getPrDiffForReview(cachedApi, locator, input),
     }),
     read_file: tool({
       description:
@@ -176,7 +198,7 @@ export function createGitHubReviewTools(
         ref: z.string().min(1).optional(),
       }),
       strict: true,
-      execute: (input) => readFileForReview(api, locator, input),
+      execute: (input) => readFileForReview(cachedApi, locator, input),
     }),
     get_file_tree: tool({
       description:
@@ -186,7 +208,7 @@ export function createGitHubReviewTools(
         depth: z.number().int().min(1).max(4).optional(),
       }),
       strict: true,
-      execute: (input) => getFileTreeForReview(api, locator, input),
+      execute: (input) => getFileTreeForReview(cachedApi, locator, input),
     }),
     search_codebase: tool({
       description:
@@ -196,7 +218,7 @@ export function createGitHubReviewTools(
         limit: z.number().int().min(1).max(20).optional(),
       }),
       strict: true,
-      execute: (input) => searchCodebaseForReview(api, locator, input),
+      execute: (input) => searchCodebaseForReview(cachedApi, locator, input),
     }),
   };
 }

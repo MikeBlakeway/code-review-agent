@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import type { PullRequestLocator } from "./pr-url";
 import type { GitHubApi } from "./review-tools";
 import {
+  createCachingGitHubApi,
   getFileTreeForReview,
   getPrDiffForReview,
   readFileForReview,
   searchCodebaseForReview,
 } from "./review-tools";
 
-const locator = {
+const locator: PullRequestLocator = {
   owner: "vercel",
   repo: "ai",
   pullNumber: 123,
@@ -160,6 +162,56 @@ describe("GitHub review tool helpers", () => {
     );
 
     expect(result.content).toContain("POST");
+  });
+
+  it("reuses PR metadata across diff and follow-up context tools", async () => {
+    let getPullRequestCalls = 0;
+    const api = createCachingGitHubApi(
+      createFakeApi({
+        async getPullRequest() {
+          getPullRequestCalls += 1;
+          return {
+            title: "Improve streaming",
+            htmlUrl: locator.url,
+            baseRef: "main",
+            headRef: "feature/streaming",
+            headSha: "abc123",
+          };
+        },
+        async listPullRequestFiles() {
+          return [
+            {
+              path: "src/app/api/chat/route.ts",
+              status: "modified",
+              additions: 12,
+              deletions: 3,
+              changes: 15,
+              patch: "@@ -1,3 +1,12 @@",
+            },
+          ];
+        },
+        async readFile(input) {
+          expect(input.ref).toBe("abc123");
+          return {
+            path: input.path,
+            ref: input.ref,
+            content: "export async function POST() {}",
+          };
+        },
+        async getFileTree(input) {
+          expect(input.ref).toBe("abc123");
+          return [];
+        },
+      }),
+    );
+
+    await getPrDiffForReview(api, locator);
+    await readFileForReview(api, locator, {
+      path: "src/app/api/chat/route.ts",
+    });
+    await getFileTreeForReview(api, locator);
+
+    expect(getPullRequestCalls).toBe(1);
   });
 
   it("gets a repository tree from the PR head by default", async () => {

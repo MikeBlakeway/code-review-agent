@@ -2,6 +2,8 @@
 
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type RenderablePart = {
   type: string;
@@ -144,9 +146,7 @@ export function ReviewAgent() {
 function MessagePart({ part }: { part: RenderablePart }) {
   if (part.type === "text") {
     return (
-      <div className="whitespace-pre-wrap text-sm leading-7 text-zinc-200">
-        {part.text}
-      </div>
+      <MarkdownContent>{part.text ?? ""}</MarkdownContent>
     );
   }
 
@@ -165,6 +165,8 @@ function ToolEvent({
   compact?: boolean;
 }) {
   const toolName = part.type.replace(/^tool-/, "").replaceAll("_", " ");
+  const summary = getToolSummary(toolName, part);
+  const hasDetails = Boolean(part.input || part.output);
 
   return (
     <div
@@ -180,11 +182,175 @@ function ToolEvent({
           {part.state ?? "pending"}
         </span>
       </div>
+      {summary ? (
+        <p className="mt-2 break-words font-mono text-xs leading-5 text-zinc-300">
+          {summary}
+        </p>
+      ) : null}
       {part.errorText ? (
         <p className="mt-2 text-xs text-red-200">{part.errorText}</p>
       ) : null}
+      {hasDetails && !compact ? (
+        <details className="mt-3 rounded-md border border-white/10 bg-black/40 px-3 py-2">
+          <summary className="cursor-pointer font-mono text-[11px] text-zinc-500">
+            raw tool payload
+          </summary>
+          <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5 text-zinc-400">
+            {JSON.stringify({ input: part.input, output: part.output }, null, 2)}
+          </pre>
+        </details>
+      ) : null}
     </div>
   );
+}
+
+function MarkdownContent({ children }: { children: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        h1: ({ children }) => (
+          <h1 className="mt-6 text-2xl font-semibold text-white first:mt-0">
+            {children}
+          </h1>
+        ),
+        h2: ({ children }) => (
+          <h2 className="mt-6 text-xl font-semibold text-white first:mt-0">
+            {children}
+          </h2>
+        ),
+        h3: ({ children }) => (
+          <h3 className="mt-5 text-base font-semibold text-white first:mt-0">
+            {children}
+          </h3>
+        ),
+        p: ({ children }) => (
+          <p className="my-3 text-sm leading-7 text-zinc-200">{children}</p>
+        ),
+        ul: ({ children }) => (
+          <ul className="my-3 list-disc space-y-2 pl-5 text-sm leading-7 text-zinc-200">
+            {children}
+          </ul>
+        ),
+        ol: ({ children }) => (
+          <ol className="my-3 list-decimal space-y-2 pl-5 text-sm leading-7 text-zinc-200">
+            {children}
+          </ol>
+        ),
+        li: ({ children }) => <li>{children}</li>,
+        code: ({ children }) => (
+          <code className="rounded border border-white/10 bg-white/[0.06] px-1.5 py-0.5 font-mono text-[0.9em] text-cyan-100">
+            {children}
+          </code>
+        ),
+        pre: ({ children }) => (
+          <pre className="my-4 overflow-auto rounded-md border border-white/10 bg-black/50 p-4 text-xs leading-6 text-zinc-200">
+            {children}
+          </pre>
+        ),
+        a: ({ children, href }) => (
+          <a
+            className="text-cyan-300 underline decoration-cyan-300/40 underline-offset-4"
+            href={href}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {children}
+          </a>
+        ),
+        table: ({ children }) => (
+          <div className="my-4 overflow-x-auto">
+            <table className="min-w-full border-collapse text-sm text-zinc-200">
+              {children}
+            </table>
+          </div>
+        ),
+        th: ({ children }) => (
+          <th className="border border-white/10 bg-white/[0.04] px-3 py-2 text-left font-semibold text-white">
+            {children}
+          </th>
+        ),
+        td: ({ children }) => (
+          <td className="border border-white/10 px-3 py-2 align-top">
+            {children}
+          </td>
+        ),
+        blockquote: ({ children }) => (
+          <blockquote className="my-4 border-l-2 border-cyan-300/50 pl-4 text-zinc-300">
+            {children}
+          </blockquote>
+        ),
+      }}
+    >
+      {children}
+    </ReactMarkdown>
+  );
+}
+
+function getToolSummary(toolName: string, part: RenderablePart) {
+  const input = asRecord(part.input);
+  const output = asRecord(part.output);
+
+  if (toolName === "read file") {
+    const path = stringValue(input.path) ?? stringValue(output.path);
+    const ref = stringValue(input.ref) ?? stringValue(output.ref);
+    return [path, ref ? `@ ${ref}` : undefined].filter(Boolean).join(" ");
+  }
+
+  if (toolName === "search codebase") {
+    const query = stringValue(input.query);
+    const resultCount = arrayLength(output.results);
+    return [
+      query ? `"${query}"` : undefined,
+      typeof resultCount === "number" ? `-> ${resultCount} results` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  if (toolName === "get pr diff") {
+    const totalFiles = numberValue(output.totalFiles);
+    const headSha = stringValue(asRecord(output.pullRequest).headSha);
+    return [
+      typeof totalFiles === "number" ? `${totalFiles} changed files` : undefined,
+      headSha ? `@ ${headSha}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  if (toolName === "get file tree") {
+    const depth = numberValue(input.depth);
+    const entries = arrayLength(output.entries);
+    return [
+      typeof depth === "number" ? `depth ${depth}` : undefined,
+      typeof entries === "number" ? `-> ${entries} entries` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function arrayLength(value: unknown) {
+  return Array.isArray(value) ? value.length : undefined;
 }
 
 function EmptyState({ children }: { children: ReactNode }) {

@@ -66,8 +66,10 @@ vercel env pull .env.local
 Run the app:
 
 ```bash
-npm run dev
+vercel dev
 ```
+
+`AI_MODEL` uses the Vercel AI Gateway model string format, for example `anthropic/claude-sonnet-4.6`. For the least surprising local runtime, use `vercel dev` so the Gateway/OIDC environment is available. Running `npm run dev` directly is only expected to work if your local shell already has valid AI Gateway credentials.
 
 Open `http://localhost:3000` and paste a public GitHub pull request URL.
 
@@ -93,10 +95,10 @@ Current coverage focuses on:
 - `read_file` and `get_file_tree` default to the PR head SHA. This keeps follow-up tool calls simple for the model and avoids reviewing stale default-branch files.
 - The adapter is injectable, which keeps unit tests deterministic and makes a future MCP extraction straightforward.
 - The UI exposes tool progress because the point of the project is to show the agent loop, not just the final markdown.
+- Pull request metadata is cached per review toolset, so follow-up file and tree reads can reuse the PR head SHA fetched by `get_pr_diff`.
 
 ## Next Steps
 
-- Render streamed markdown with AI Elements or another markdown-safe renderer.
 - Add pagination for PRs with more than 100 changed files.
 - Add optional GitHub App authentication for private repositories.
 - Extract the GitHub tools into a TypeScript MCP server package.
