@@ -6,7 +6,7 @@ The project is intentionally small: its purpose is to demonstrate an LLM decidin
 
 ## Why This Exists
 
-This project is built as portfolio evidence for Senior AI Platform Engineer work. It demonstrates:
+This project demonstrates:
 
 - Agentic workflow design where the model plans tool use across multiple steps.
 - Tool-using LLM orchestration with scoped GitHub capabilities.
